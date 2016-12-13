@@ -1,9 +1,13 @@
 import numpy as np
+import nibabel as nib
 import os
 import struct
 from statsmodels.api import OLS,add_constant
 from os.path import join as opj
 import math
+import ipdb
+from mayavi import mlab
+import matplotlib.pyplot as plt
 
 def balance_svd_components(trg,src,return_balanced=False):
     nt=np.shape(trg)[1]
@@ -32,19 +36,22 @@ def assert_dir(p):
         os.makedirs(p)
 
 def vec_angle(v1,v2):
-    return np.arccos(np.dot(v1/L2_norm(v1), v2/L2_norm(v2)))
+    return np.arccos(np.dot(v1/vlen(v1), v2/vlen(v2)))
+
+def norm_arclen(v,n):
+    return vlen(v)**2*np.arcsin(np.dot(n,v)/vlen(v))/np.dot(n,v)
 
 def rotate3d(v,ang,axis=0,compute=True,matrix=False):
     # Simple 3d rotation, one axis at a time, to avoid confusion.
     # Could be expanded eventually, but not necessary at the time
-    
+
     if axis==0: # x
         R=np.array([[1,0,0],[0,np.cos(ang),-np.sin(ang)],[0,np.sin(ang),np.cos(ang)]])
     elif axis==1: # y
         R=np.array([[np.cos(ang),0,np.sin(ang)],[0,1,0],[-np.sin(ang),0,np.cos(ang)]])
     elif axis==2: #z
         R=np.array([[np.cos(ang),-np.sin(ang),0],[np.sin(ang),np.cos(ang),0],[0,0,1]])
-    
+
     if compute and matrix:
         return np.dot(R,v),R
     if not compute and matrix:
@@ -52,11 +59,11 @@ def rotate3d(v,ang,axis=0,compute=True,matrix=False):
     if compute and not matrix:
         return np.dot(R,v)
 
-def L2_norm(x,axis=-1):
+def vlen(x,axis=-1):
     return np.sum(np.abs(x)**2,axis=axis)**(1./2)
 
 def normv(v):
-    return v/L2_norm(v)
+    return v/vlen(v)
 
 def normm(data,axis=-1):
     return np.apply_along_axis(normv,axis,data)
@@ -87,10 +94,10 @@ def fs_read_surf(fname,verbose=False):
 
         # Read data and reshape
         position=np.reshape(struct.unpack('>' + str(3*nv) + 'f',f.read(nv*12)),[nv,3],order='C') # 3 * float32
-        vertices=np.reshape(struct.unpack('>' + str(3*nf) + 'i',f.read(nf*12)),[nf,3],order='C') # 3 * int32
+        faces=np.reshape(struct.unpack('>' + str(3*nf) + 'i',f.read(nf*12)),[nf,3],order='C') # 3 * int32
 
     f.close()
-    return vertices,position
+    return faces,position
 
 def fs_read_label(fname):
     with open(fname) as f:
@@ -102,61 +109,71 @@ def fs_read_label(fname):
     f.close()
     return nv
 
-def fs_surf_neighborhood(fname,out_type='matrix',verbose=False,save_out=''):
-    
+def fs_surf_neighborhood(fname,out_type='matrix',mask=None,save_out=None,verbose=False):
+
     if out_type not in {'matrix','list'}:
         raise ValueError('Invalid out_type ' + out_type)
-    
+
     # Build neighborhood matrix where neigh(i,j)=True is i and j are neighbors, False otherwise.
     if verbose:
         print('Reading ' + fname)
-    vertices,_=fs_read_surf(fname)
-    verticesID=np.unique(vertices) # Unique vertices ID
-    mv=np.max(vertices)+1 # Vertices IDs are 0 based
-    
+    faces,_=fs_read_surf(fname)
+    if mask is not None:
+        vertices,_,_=fs_load_mask(mask)
+    else:
+        vertice=np.unique(faces) # Unique vertices ID
+
     # Preallocate memory
     if out_type=='list':
-        neigh=np.ndarray(mv,dtype=object)
+        neigh=np.ndarray(len(vertices),dtype=object)
     else:
-        neigh=np.zeros([mv,mv],dtype=bool)
-    
-    # Identify neighbors
-    if out_type=='list': # This is faster than matrix
-        for nv in verticesID:
-            if verbose and nv % 10000==0 and nv != 0:
-                print(str(nv) + '/' + str(len(verticesID)))
-            neighID=np.unique(vertices[np.sum(vertices==nv,axis=1)>=1,:])
-            neigh[nv]=neighID[neighID!=nv]
-    else:
-        for nv in verticesID:
-            if verbose and nv % 10000==0 and nv != 0:
-                print(str(nv) + '/' + str(len(verticesID)))
-            neigh[nv,vertices[np.sum(vertices==nv,axis=1)>=1,:]]=True # Preliminary testing shows that it is faster to not take unique column indices
-        neigh[np.eye(mv,dtype=bool)]=False # A vertice is not neighbor is itself
-    
-    if len(save_out)>0:
-        if verbose:
-            print('Saving file ' + save_out + '.' + out_type)
-        np.save(save_out + '.' + out_type,neigh)
-    
-    return neigh
+        neigh=np.zeros([len(vertices),len(vertices)],dtype=bool)
 
-def fs_create_cortex_mask(subjects_dir,targ,hemi,validate=True,verbose=False,save_out=''):
-    
+    # Identify neighbors
+    ni=0
+    for nv in vertices:
+        if verbose and ni % 10000==0 and ni != 0:
+            print(str(ni) + '/' + str(len(vertices)))
+
+        neigh_ids=np.unique(faces[np.sum(faces==nv,axis=1)>=1,:])
+        neigh_ids=neigh_ids[np.logical_and(neigh_ids != nv,neigh_ids in vertices)]
+        if out_type=='matrix':
+            neigh[np.where(vertices in neigh_ids),:]=True
+        else:
+            neigh[ni]=neigh_ids
+        ni=ni+1
+
+    if save_out is not None:
+        if verbose:
+            print('Saving file neighborhood structure to ' + save_out + '.' + out_type)
+        np.save(save_out + '.' + out_type,neigh,vertices)
+
+    return neigh,vertices
+
+def fs_load_surf_neighborhood(fname):
+    if not fname.endswith('.npz'):
+        fname=fname+'.npz'
+    out=np.load(fname)
+    return out['arr_0'],out['arr_1']
+
+def fs_create_cortex_mask(subjects_dir,targ,hemi,validate=True,verbose=False,save_out=None):
+
     cortex=fs_read_label(opj(subjects_dir,targ,'label',hemi+'.cortex.label'))
-    
+    medial=fs_read_label(opj(subjects_dir,targ,'label',hemi+'.Medial_wall.label'))
+    N=len(cortex)+len(medial)
+
     # Make sure each cortex vertice is neighbor of at least another cortex vertice
     # This sanity check is necessary since this vertices of the medial wall have previously
     # been labeled as cortex for fsaverage, left hemisphere (e.g. fsaverage/surf/lh.pial)
     if validate:
-        neigh=fs_surf_neighborhood(opj(subjects_dir,targ,'surf',hemi+'.pial'),out_type='list',verbose=verbose) 
-        
+        neigh=fs_surf_neighborhood(opj(subjects_dir,targ,'surf',hemi+'.pial'),out_type='list',verbose=verbose)
+
         if verbose:
             print('Validating cortex mask')
-            ni=0        
+            ni=0
         invalid=np.ndarray(0,dtype=int)
         for nc in cortex:
-            if verbose:        
+            if verbose:
                 if ni % 10000==0 and ni != 0:
                     print(str(ni) + '/' + str(len(cortex)))
                 ni=ni+1
@@ -164,138 +181,251 @@ def fs_create_cortex_mask(subjects_dir,targ,hemi,validate=True,verbose=False,sav
                 if verbose:
                     print('Detected invalid vertex ' + str(nc))
                 np.append(invalid,nc)
-        cortex=cortex[np.array([vert not in invalid for vert in cortex],dtype=bool)]
-    
-    if len(save_out)>0:
+        cortex=cortex[np.array([nc not in invalid for nc in cortex],dtype=bool)]
+        medial=np.append(medial,invalid)
+
+    if save_out is not None:
         if verbose:
             print('Saving file ' + save_out)
-        np.savez(save_out,cortex)
-    
-    return cortex
+        np.savez(save_out,cortex,medial,N)
+
+    return cortex,medial,N
 
 def fs_load_mask(fname):
-    mask=np.load(fname)
-    return mask['arr_0']
+    if not fname.endswith('.npz'):
+        fname=fname+'.npz'
+    out=np.load(fname)
+    return out['arr_0'],out['arr_1'],out['arr_2']
 
-def fs_load_surf_data(fname,fmask=''):
+def fs_load_surf_data(fname,mask=None):
     img=nib.load(fname)
     img=np.squeeze(img.get_data())
-    if len(fmask)>0:
-        if not fmask.endswith('.npz'):
-            fmask=fmask+'.npz'
-        mask=fs_load_mask(fmask)
-        
+    if mask is not None:
+        ma,_,_=fs_load_mask(mask)
         if img.ndim>1 and img.shape[1]>1:
-            return img[mask,:],mask
+            return img[ma,:],ma
         else:
-            return img[mask],mask
+            return img[ma],ma
     else:
         return img
 
-def fs_save_surf_data(data,fname,fmask='',verbose=True):
-    if len(fmask)>0:
-        mask=fs_load_mask(fmask)
-        img[0,mask,0,:]=img
-    elif img.ndim==2:
-        img=reshape(img,[1,img.shape[0],1,img.shape[1]])
-    # Assume that at this point the data is well formated
-    if verbose:
-        print('Saving data with dimensions ' + str(data.shape) + ' to file ' + fname)
-    nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
+def fs_save_surf_data(data,fname,mask=None,verbose=True):
+    if mask is not None:
+        # Here we assume that the datta is provided as a 1D or 2D matrix and that the rows correspond to the masks indices concatenated
+        if type(mask) is not list and type(mask) is not str:
+            raise ValueError('mask must be a string or a list')
+        if type(mask) is str:
+            mask=[mask]
+        nstart=0
+        nstop=0
+        for fmask in mask:
+            nstart=nstop
+            ma,_,N=fs_load_mask(fmask)
+            nstop=nstop+N
+            img=np.zeros(1,N,1,data.shape[1])
+            img[0,ma,0,:]=data[np.arange(ntart,nstop),:]
+            if verbose:
+                print('Input dimensions=' + str(data.shape)+', Output dimensions=' + str(img.shape))
+                print('Saving surface data to file ' + fname)
+            nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
+    else:
+        if data.ndim==1: # Here we assume that the data is well formated as a 2D matrix, i.e. there is as many rows as surface vertices
+            img=np.reshape(data,[1,data.shape[0],1,1])
+        elif data.ndim==2: # Here we assume that the data is well formated as a 2D matrix, i.e. there is as many rows as surface vertices
+            img=np.reshape(data,[1,data.shape[0],1,data.shape[1]])
+        else:
+            img=data
+        if verbose:
+            print('Input dimensions=' + str(data.shape)+', Output dimensions=' + str(img.shape))
+            print('Saving surface data to file ' + fname)
+        nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
 
-def fs_surf_gradient_struct(fname,verbose=False,validate_rotation=False):
-    # Computes the average normal at every vertices
-        
-    faces,position=fs_read_surf(fname)
-    vertices=np.sort(np.unique(faces)( # Unique vertices ID
-    mv=np.max(vertices)+1 # Vertices IDs are 0 based
-    proj=np.ndarray(len(vertices),dtype=object) # Hold coordinates, within normal plane, of points onto the plane
-    neigh=np.ndarray(len(vertices),dtype=object) # Hold indice of projected points
-    
+def fs_surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_out=None):
+    # Computes the gradient structure at every vertex
+
     if verbose:
-        print('Computing gradient structure at every vertice')
-    for nv in vertices:
-        
+        print('Processing '+fname)
+
+    faces,position=fs_read_surf(fname)
+    vertices=np.sort(np.unique(faces)) # Unique vertices ID
+    mv=np.max(vertices)+1 # Vertices IDs are 0 based
+    proj=np.empty(len(vertices),dtype=object) # Hold coordinates, within normal plane, of points onto the plane
+    neigh=np.empty(len(vertices),dtype=object) # Hold indice of projected points
+
+    # Find out which vertices are neighboring the medial wall and remove them foor cortical mask
+    if verbose:
+        print('Extracting cortical vertices bordering medial wall')
+    cortex,medial,_=fs_load_mask(mask)
+    border=np.ndarray(0,dtype=int)
+    for nc in cortex:
+        faces_ind=faces[np.sum(faces==nc,axis=1)>=1,:]
+        in_medial=[nf in medial for nf in faces_ind]
+        if np.any(in_medial):
+            border=np.append(border,nc)
+            neigh[nc]=faces[not in_medial]
+    cortex=cortex[np.array([nc not in border for nc in cortex],dtype=bool)]
+
+    if verbose:
+        print('Computing gradient structure for cortical vertices')
+        ni=0
+    for nc in cortex:
+
         # Note: vertices for each faces are always ordered so that their cross product points outward,
         # hence to have consistent normals, we simply need to make sure the ordering is respected.
-        
-        if verbose and nv % 10000==0 and nv != 0:
-                print(str(nv) + '/' + str(len(vertices)))
-        
-        # Find the normal of each face the current vertice is part of and take the average
-        face_vertices=np.where(np.sum(vertices==nv,axis=1)>=1)[0] # Extract rows for each faces containing the current vertice
-        fnorm=np.ndarray([len(faces),3])
-        nn=0
-        for nf in faces:    
-            ind=np.where(vertices[nf,:]==nv)[0]
-            if ind==0:
-                fnorm[nn,:]=np.cross(position[vertices[nf,2],:]-position[vertices[nf,0],:],
-                            position[vertices[nf,1],:]-position[vertices[nf,0],:])
-            elif ind==1:
-                fnorm[nn,:]=np.cross(position[vertices[nf,0],:]-position[vertices[nf,1],:],
-                                position[vertices[nf,2],:]-position[vertices[nf,1],:])
-            elif ind==2:
-                fnorm[nn,:]=np.cross(position[vertices[nf,1],:]-position[vertices[nf,2],:],
-                                position[vertices[nf,0],:]-position[vertices[nf,2],:])
 
-            nn=nn+1   
+        if verbose:
+            if ni % 10000==0 and ni != 0:
+                print(str(ni) + '/' + str(len(cortex)))
+            ni=ni+1
+
+        # Find the normal of each face the current vertice is part of and take the average
+        faces_ind=np.where(np.sum(faces==nc,axis=1)>=1)[0] # Extract rows for each faces containing the current vertice
+        fnorm=np.ndarray([len(faces_ind),3])
+        nn=0
+        for nf in faces_ind:
+            ind=np.where(faces[nf,:]==nc)[0]
+            if ind==0:
+                fnorm[nn,:]=np.cross(position[faces[nf,2],:]-position[faces[nf,0],:],
+                            position[faces[nf,1],:]-position[faces[nf,0],:])
+            elif ind==1:
+                fnorm[nn,:]=np.cross(position[faces[nf,0],:]-position[faces[nf,1],:],
+                                position[faces[nf,2],:]-position[faces[nf,1],:])
+            elif ind==2:
+                fnorm[nn,:]=np.cross(position[faces[nf,1],:]-position[faces[nf,2],:],
+                                position[faces[nf,0],:]-position[faces[nf,2],:])
+
+            nn=nn+1
 
         # Take average of all faces norms and normalize final vector
         snorm=normv(normm(fnorm,axis=1).mean(axis=0))
-        
+
         # Project each neighboring points onto the plane defined by the normal
-        pts=np.unique(vertices[faces,:])
+        pts=np.unique(faces[faces_ind,:])
         proj_pts=np.ndarray([len(pts),3])
-        px=position[pts,:]-position[nv,:]
-        for pt in np.arange(0,len(pts)):            
+        px=position[pts,:]-position[nc,:] # Position of every point, ajuested for position of current vertice
+        for pt in np.where(pts!=nc)[0]:
             proj_pts[pt,:]=px[pt,:]-np.dot(px[pt,:],snorm)*snorm
-        
+            proj_pts[pt,:]=proj_pts[pt,:]*(norm_arclen(px[pt,:],snorm)/vlen(proj_pts[pt,:]))
+
         # Find rotation of normal vector onto z-axis
         ez=np.array([0.,0.,1.])
         # Rotate along x-axis
         ax=vec_angle(ez,np.array([0,snorm[1],snorm[2]]))
         if snorm[1]<0:
-            ax=-ax        
+            ax=-ax
         # Rotate along y-axis
         vrx,Rx=rotate3d(snorm,ax,axis=0,compute=True,matrix=True)
         ay=vec_angle(ez,vrx)
         if vrx[0]>0:
             ay=-ay
         vz,Ry=rotate3d(vrx,ay,axis=1,compute=True,matrix=True)
-        
+
         # For sanity, check that snorm was well projected onto z-axis
         if validate_rotation:
             if (not math.isclose(vz[0],0.0, abs_tol=1e-9) or not math.isclose(vz[1],0.0, abs_tol=1e-9) or not
                 math.isclose(vz[2],1.0, abs_tol=1e-9)):
                 print(vz)
                 raise ValueError('Normal vector was not well projected onto z-axis')
-        
+
         # Rotate neighbor points
-        proj[nv]=np.transpose(np.dot(np.dot(Ry,Rx),np.transpose(proj_pts)))[:,[0,1]] # 2d matrix with rows as points and columns as x and y
-        neigh[nv]=pts
-        
-    return proj,neigh
+        proj[nc]=np.transpose(np.dot(np.dot(Ry,Rx),np.transpose(proj_pts)))[:,[0,1]] # 2d matrix with rows as points and columns as x and y
+        neigh[nc]=pts
 
-def build_surface_gradient_matrix(fname,verbose=False):
+    if save_out is not None:
+        if verbose:
+            print('Saving gradient structure to '+save_out)
+        np.savez(save_out,proj,neigh,cortex,border)
 
-    snorm=fs_surf_vertices_normals(fname,verbose=verbose)
-    
-    # For every vertice, find orthogonal plane to normal, projects neigbors and compute coordinates in plane
-    for nv in vertices:        
-        # Project each point onto the plane defined by the normal vector        
-        u1=normalize([1,1,-(snorm[nv,0]+snorm[nv,1])/snorm[nv,2]]) # v1*u1+v2*u2+v3*u3=0 -> v1+v2+v3*u3=0 -> u3=-(v1+v2)/v3
-        u2=normalize(np.cross(u1,v))
+    return proj,neigh,cortex,border
 
-    # Load vertices forming each triangle in the surface mesh
-    N,position=build_neighborhood_matrix(fname)
-    gradvec=np.zeros([N.shape[0],3])
-    for nv in np.arange(0,N.shape[0]):
-        # Project each neighbor on normal plan
+def fs_load_surf_gradient(fname):
+    # Load gradient structure
+    if not fname.endswith('.npz'):
+        fname=fname+'.npz'
+    out=np.load(fname)
+    return out['arr_0'],out['arr_1'],out['arr_2'],out['arr_3']
 
-        # Adjust position of each neighbor by making sure that the distance is
-        # equal to the arc length
+def fs_surf_gradient(data,fgrad,save_out=None,verbose=False):
+    if verbose:
+        print('Computing gradient')
+    proj,neigh,cortex,border=fs_load_surf_gradient(fgrad)
+    grad=np.zeros(proj.shape[0],dtype=float)
 
+    if verbose:
+        print('Processing cortical vertices')
+    for nc in cortex:
         # Fit a plane to obtain the gradient
-        gradvec[nv,:]=OLS(data[N[:,nv]],add_constant(position[N[nv,:]])).fit().params[1:4]
+        try:
+            grad[nc]=vlen(OLS(data[neigh[nc]],add_constant(proj[nc])).fit().params[1:2])
+        except:
+            ipdb.set_trace()
+            return
 
-    return gradvec
+    # Border vertuces take the mean gradient of their neighbors
+    if verbose:
+        print('Processing border vertices')
+    for nb in border:
+        grad[nb]=grad[neigh[nb]].mean()
+
+    if save_out is not None:
+        fs_save_surf_data(grad,save_out,verbose=verbose)
+
+    return grad
+
+def fs_surf_view(surf,data=None,view='mid',hemi='lh',snap=False,plot_snap=False):
+
+    if plot_snap and not snap: # Make sure snapping is on if we are plotting it
+        snap=True
+    if view is str:
+        view=[view]
+    if snap:
+        img=np.ndarray(len(view),dtype=object)
+
+    for nv in np.arange(0,len(view)):
+        mlab.clf()
+
+        # Adjust view according to hemisphere being displayed
+        if hemi=='lh':
+            adj=0
+        elif hemi=='rh':
+            adj=180
+        else:
+            raise ValueError('Invalid hemisphere '+str(hemi))
+
+        if data is str:
+            scalars=mu.fs_load_surf_data(data)
+        else:
+            scalars=data
+
+        faces,position=fs_read_surf(surf)
+        mlab.triangular_mesh(position[:,0],position[:,1],position[:,2],faces,scalars=scalars)
+
+        # Adjust view
+        dist=350
+        if view[nv]=='mid':
+            mlab.view(azimuth=180+adj,elevation=90,distance=dist)
+        elif view[nv]=='side':
+            mlab.view(azimuth=0+adj,elevation=90,distance=dist)
+        elif view[nv]=='back':
+            mlab.view(azimuth=90,elevation=90,distance=dist)
+        elif view[nv]=='front':
+            mlab.view(azimuth=-90,elevation=90,distance=dist)
+        else:
+            raise ValueError('Invalid view '+str(view[nv]))
+
+        mlab.show()
+        print(mlab.view())
+
+        if snap:
+            img[nv]=mlab.screenshot()
+            mlab.close()
+
+    if snap:
+        if plot_snap:
+            plt.figure(figsize=(8,2))
+            for nv in np.arange(0,len(view)):
+                plt.subplot(1,len(view),nv+1)
+                plt.imshow(img[nv])
+                plt.axis('off')
+            plt.show()
+        return img
