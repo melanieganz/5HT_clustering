@@ -99,8 +99,8 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
 
     if mode=='whole':
         if verbose:
-            print('Performing ward clustering of the whole dataset')        
-        
+            print('Performing ward clustering of the whole dataset')
+
         # Apply func to the data
         if data.dtype==object:
             data=np.column_stack(data)
@@ -109,7 +109,7 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
             fdata=np.transpose(svd.components_)
         else:
             fdata=data
-            
+
         ward_labels=np.zeros([fdata.shape[0],len(K_range)])
         for k,nk in zip(K_range,np.arange(0,len(K_range))):
             mdl=AgglomerativeClustering(n_clusters=k, connectivity=adjacency,linkage='ward')
@@ -125,7 +125,7 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
     elif mode=='split':
         if verbose:
             print('Performing split-half evaluation of clustering')
-        
+
         ars=np.empty([N_iter,len(K_range)])
         ami=np.empty([N_iter,len(K_range)])
         mdl1=AgglomerativeClustering(compute_full_tree=True, connectivity=adjacency,linkage='ward')
@@ -134,7 +134,7 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
             N=len(data)
         else:
             N=data.shape[1]
-        
+
         for ni in np.arange(0,N_iter):
             # Compute splits
             if group is None:
@@ -143,7 +143,7 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
             else:
                 kf=StratifiedKFold(n_splits=2,shuffle=True,random_state=None) # Split-half model
                 split1,split2=kf.split(np.arange(0,N,group))
-            
+
             # Apply SVD
             if data.dtype==object:
                 data1=np.column_stack(data[split1[0]])
@@ -152,7 +152,7 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
                 data1=data[:,split1[0]]
                 data2=data[:,split2[0]]
             if svd:
-                
+
                 svd.fit(np.transpose(data1))
                 fdata1=np.transpose(svd.components_)
                 svd.fit(np.transpose(data2))
@@ -160,14 +160,14 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
             else:
                 fdata1=data1
                 fdata2=data2
-            
+
             mdl1.fit(fdata1)
             mdl2.fit(fdata2)
 
             for nk in np.arange(0,len(K_range)):
                 # Cut trees
                 # NOTE: labels start at 0, so add one to distinguish from medial wall
-                labels1=_hc_cut(nk,mdl1.children_,mdl1.n_leaves_)+1 
+                labels1=_hc_cut(nk,mdl1.children_,mdl1.n_leaves_)+1
                 labels2=_hc_cut(nk,mdl2.children_,mdl2.n_leaves_)+1
 
                 # Compute metrics
@@ -188,8 +188,9 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
 
 def fs_read_surf(fname,verbose=False):
 
-# This function is derived from freesurfer_read_surf.m
-# Note: files are encoded in big-endian
+    # This function is derived from freesurfer_read_surf.m
+    # Note: files are encoded in big-endian
+    # Note: Nibabel also has this function, but it should be equivalent
 
     with open(fname,mode='rb') as f:
         # Verify that file is a triangle file
@@ -216,6 +217,7 @@ def fs_read_surf(fname,verbose=False):
     return faces,position
 
 def fs_read_label(fname):
+    # Note: Nibabel also has this function, but it should be equivalent
     with open(fname) as f:
         for i,line in enumerate(f): # i starts at 0
             if i==1: # Line 2 contains the number of vertices in the label
@@ -257,7 +259,7 @@ def fs_surf_neighborhood(fname,out_type='matrix',mask=None,save_out=None,verbose
         if out_type=='matrix':
             neigh[np.array([x in neigh_ids and x!=nv for x in vertices],dtype=bool),ni]=1
         else:
-            neigh[ni]=neigh_ids[np.array([x in vertices and x!=nv for x in neigh_ids],dtype=bool)] 
+            neigh[ni]=neigh_ids[np.array([x in vertices and x!=nv for x in neigh_ids],dtype=bool)]
 
     if save_out is not None:
         if verbose:
@@ -285,7 +287,7 @@ def fs_create_cortex_mask(subjects_dir,targ,hemi,validate=True,verbose=False,sav
     # been labeled as cortex for fsaverage, left hemisphere (e.g. fsaverage/surf/lh.pial)
     if validate:
         if verbose:
-            print('Validating cortex mask, this may take a while')   
+            print('Validating cortex mask, this may take a while')
         faces,_=fs_read_surf(opj(subjects_dir,targ,'surf',hemi+'.pial'),verbose=verbose)
         invalid=np.ndarray(0,dtype=int)
         for nc,ni in zip(cortex,np.arange(0,len(cortex))):
@@ -337,7 +339,7 @@ def fs_save_surf_data(data,fname,mask=None,verbose=False):
             fname=[fname]
         if len(mask)!=len(fname):
             raise ValueError('Number of output files and masks is not the same')
-        
+
         nstart=0
         nstop=0
         for fout,fmask in zip(fname,mask):
