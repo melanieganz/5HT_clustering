@@ -25,7 +25,7 @@ def balance_svd_components(trg,src,return_balanced=False):
     src_ind=np.zeros(ns,dtype=int)
     flip_ind=np.ones(ns,dtype=float)
     for nk in np.arange(0,nt):
-        cc=[np.dot(np.transpose(src[:,nk]),trg[:,ct]) for ct in trg_ind]
+        cc=[np.dot(src[:,nk].T,trg[:,ct]) for ct in trg_ind]
         ind=np.argmax(np.abs(cc))
         src_ind[nk]=trg_ind[ind]
         trg_ind=np.delete(trg_ind,ind)
@@ -105,8 +105,8 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
         if data.dtype==object:
             data=np.column_stack(data)
         if svd:
-            svd.fit(np.transpose(data))
-            fdata=np.transpose(svd.components_)
+            svd.fit(data.T)
+            fdata=svd.components_.T
         else:
             fdata=data
 
@@ -153,10 +153,10 @@ def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=
                 data2=data[:,split2[0]]
             if svd:
 
-                svd.fit(np.transpose(data1))
-                fdata1=np.transpose(svd.components_)
-                svd.fit(np.transpose(data2))
-                fdata2=np.transpose(svd.components_)
+                svd.fit(data1.T)
+                fdata1=svd.components_.T
+                svd.fit(data2.T)
+                fdata2=svd.components_.T
             else:
                 fdata1=data1
                 fdata2=data2
@@ -314,15 +314,19 @@ def fs_load_mask(fname):
     out=np.load(fname)
     return out['arr_0'],out['arr_1'],out['arr_2']
 
-def fs_load_surf_data(fname,mask=None):
+def fs_load_surf_data(fname,mask=None,output_mask=False):
     img=nib.load(fname)
     img=np.squeeze(img.get_data())
     if mask is not None:
         ma,_,_=fs_load_mask(mask)
         if img.ndim>1 and img.shape[1]>1:
-            return img[ma,:],ma
+            img=img[ma,:]
         else:
-            return img[ma],ma
+            img=img[ma]
+        if output_mask:
+            return img,ma
+        else:
+            return img
     else:
         return img
 
@@ -446,7 +450,7 @@ def fs_surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,sav
                 raise ValueError('Normal vector was not well projected onto z-axis')
 
         # Rotate neighbor points
-        proj[nc]=np.transpose(np.dot(np.dot(Ry,Rx),np.transpose(proj_pts)))[:,[0,1]] # 2d matrix with rows as points and columns as x and y
+        proj[nc]=np.dot(np.dot(Ry,Rx),proj_pts.T).T[:,[0,1]] # 2d matrix with rows as points and columns as x and y
         neigh[nc]=pts
 
     if save_out is not None:
