@@ -496,6 +496,8 @@ def fs_surf_gradient(data,fgrad,save_out=None,verbose=False):
 
 def fs_surf_view(surf,data=None,view='mid',hemi='lh',snap=False,plot_snap=False):
 
+    mlab.init_notebook() # make plot inline in jupyter
+
     if plot_snap and not snap: # Make sure snapping is on if we are plotting it
         snap=True
     if view is str:
@@ -536,9 +538,8 @@ def fs_surf_view(surf,data=None,view='mid',hemi='lh',snap=False,plot_snap=False)
             raise ValueError('Invalid view '+str(view[nv]))
         if snap:
             img[nv]=mlab.screenshot()
-        else:
-            mlab.show()
-
+            if not plot_snap: # in case plots are not inline
+                mlab.close()
     if snap:
         if plot_snap:
             plt.figure(figsize=(8,2))
