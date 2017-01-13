@@ -65,10 +65,10 @@ def assert_dir(p):
         os.makedirs(p)
 
 def vec_angle(v1,v2):
-    return np.arccos(np.dot(v1/vlen(v1), v2/vlen(v2)))
+    return np.arccos(np.dot(v1/np.linalg.norm(v1), v2/np.linalg.norm(v2)))
 
 def norm_arclen(v,n):
-    return vlen(v)**2*np.arcsin(np.dot(n,v)/vlen(v))/np.dot(n,v)
+    return np.linalg.norm(v)**2*np.arcsin(np.dot(n,v)/np.linalg.norm(v))/np.dot(n,v)
 
 def normalize_range(x,percentile=None):
     if x.ndim!=1: # Until it is extended to matrices
@@ -109,7 +109,7 @@ def rv(x,y):
     return ssq(np.dot(yc.T,xc))/np.sqrt(ssq(np.dot(xc.T,xc))*ssq(np.dot(yc.T,yc)))
 
 def congruence(X,Y):
-    return np.sum(np.dot(X.T,Y))/np.sqrt(np.sum(np.square(X))*np.sum(np.square(X)))
+    return np.sum(np.multiply(X,Y))/np.sqrt(np.sum(np.square(X))*np.sum(np.square(X)))
 
 def stability(X,Y,metric='rv'):
     if metric=='rv':
@@ -523,21 +523,23 @@ def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_o
 
         # Find the normal of each face the current vertice is part of and take the average
         faces_ind=np.where(np.sum(faces==nc,axis=1)>=1)[0] # Extract rows for each faces containing the current vertice
-        fnorm=np.ndarray([len(faces_ind),3])
-        for nf,nn in zip(faces_ind,len(faces_ind)):
+        fnorm=np.ndarray([3,len(faces_ind)])
+        for nf,nn in zip(faces_ind,np.arange(0,len(faces_ind))):
             ind=np.where(faces[nf,:]==nc)[0]
             if ind==0:
-                fnorm[nn,:]=np.cross(position[faces[nf,2],:]-position[faces[nf,0],:],
+                fnorm[:,nn]=np.cross(position[faces[nf,2],:]-position[faces[nf,0],:],
                             position[faces[nf,1],:]-position[faces[nf,0],:])
             elif ind==1:
-                fnorm[nn,:]=np.cross(position[faces[nf,0],:]-position[faces[nf,1],:],
+                fnorm[:,nn]=np.cross(position[faces[nf,0],:]-position[faces[nf,1],:],
                                 position[faces[nf,2],:]-position[faces[nf,1],:])
             elif ind==2:
-                fnorm[nn,:]=np.cross(position[faces[nf,1],:]-position[faces[nf,2],:],
+                fnorm[:,nn]=np.cross(position[faces[nf,1],:]-position[faces[nf,2],:],
                                 position[faces[nf,0],:]-position[faces[nf,2],:])
 
         # Take average of all faces norms and normalize final vector
-        snorm=normv(normm(fnorm,axis=1).mean(axis=0))
+        fnorm=fnorm/np.linalg.norm(fnorm)
+        snorm=fnorm.mean(axis=1)
+        snorm=snorm/np.linalg.norm(snorm)
 
         # Project each neighboring points onto the plane defined by the normal
         pts=np.unique(faces[faces_ind,:])
@@ -545,7 +547,7 @@ def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_o
         px=position[pts,:]-position[nc,:] # Position of every point, ajuested for position of current vertice
         for pt in np.where(pts!=nc)[0]:
             proj_pts[pt,:]=px[pt,:]-np.dot(px[pt,:],snorm)*snorm
-            proj_pts[pt,:]=proj_pts[pt,:]*(norm_arclen(px[pt,:],snorm)/vlen(proj_pts[pt,:]))
+            proj_pts[pt,:]=proj_pts[pt,:]*(norm_arclen(px[pt,:],snorm)/np.linalg.norm(proj_pts[pt,:]))
 
         # Find rotation of normal vector onto z-axis
         ez=np.array([0.,0.,1.])
@@ -596,10 +598,9 @@ def surf_gradient(data,fgrad,save_out=None,verbose=False):
     for nc in cortex:
         # Fit a plane to obtain the gradient
         try:
-            grad[nc]=vlen(OLS(data[neigh[nc]],add_constant(proj[nc])).fit().params[1:2])
+            grad[nc]=np.linalg.norm(OLS(data[neigh[nc]],add_constant(proj[nc])).fit().params[1:2])
         except:
-            ipdb.set_trace()
-            return
+            Tracer()()
 
     # Border vertices take the mean gradient of their neighbors
     if verbose:
