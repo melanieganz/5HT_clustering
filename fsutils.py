@@ -7,7 +7,7 @@ from os.path import join as opj
 import math
 from IPython.core.debugger import Tracer
 import matplotlib.pyplot as plt
-from mayavi import mlab
+#from mayavi import mlab
 
 # Sklearn stuff
 from sklearn.decomposition import TruncatedSVD
@@ -184,6 +184,34 @@ def split_half(data,func,n_iter=100,groups=None,verbose=False,stabil_metric=None
             components2,_=balance_components(components,components2,metric=repro_metric)
             repro[ni,:]=np.abs(pairwise_metric(components1,components2,metric=repro_metric))
     return stabil,repro
+
+#def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=None,N_iter=1000,svd=False,K_svd=None,group=None,verbose=False):
+
+    #if K_range is None:
+        #raise ValueError('Range of cluster number not specified')
+
+        #if verbose:
+            #print('Performing ward clustering of the whole dataset')
+
+        ## Apply func to the data
+        #if data.dtype==object:
+            #data=np.column_stack(data)
+        #if svd:
+            #svd.fit(data.T)
+            #fdata=svd.components_.T
+        #else:
+            #fdata=data
+
+        #ward_labels=np.zeros([fdata.shape[0],len(K_range)])
+        #for k,nk in zip(K_range,np.arange(0,len(K_range))):
+            #mdl=AgglomerativeClustering(n_clusters=k, connectivity=adjacency,linkage='ward')
+            #mdl.fit(fdata)
+            #ward_labels[:,nk]=mdl.labels_+1
+
+        #if save_out is not None:
+            #if mask is None:
+                #raise ValueError('Specifiy a surface mask to save data')
+            #save_surf_data(ward_labels,save_out,mask=mask,verbose=verbose)
 
 #def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=None,N_iter=1000,svd=False,K_svd=None,group=None,verbose=False):
     ## Perform Ward clustering on BPnd data
