@@ -5,10 +5,9 @@ import struct
 from statsmodels.api import OLS,add_constant
 from os.path import join as opj
 import math
-#import ipdb # Had to downgrade to 0.8.1 due to bug
 from IPython.core.debugger import Tracer
-from mayavi import mlab
 import matplotlib.pyplot as plt
+from mayavi import mlab
 
 # Sklearn stuff
 from sklearn.decomposition import TruncatedSVD
@@ -82,23 +81,33 @@ def normalize_range(x,percentile=None):
         x[x>up]=up
     return (x - x.min()) / (x.max() - x.min())
 
-def rotate3d(v,ang,axis=0,compute=True,matrix=False):
-    # Simple 3d rotation, one axis at a time, to avoid confusion.
-    # Could be expanded eventually, but not necessary at the time
+#def rotate3d(v,ang,axis=0,compute=True,matrix=False):
+    ## Simple 3d rotation, one axis at a time, to avoid confusion.
+    ## Could be expanded eventually, but not necessary at the time
 
-    if axis==0: # x
-        R=np.array([[1,0,0],[0,np.cos(ang),-np.sin(ang)],[0,np.sin(ang),np.cos(ang)]])
-    elif axis==1: # y
-        R=np.array([[np.cos(ang),0,np.sin(ang)],[0,1,0],[-np.sin(ang),0,np.cos(ang)]])
-    elif axis==2: #z
-        R=np.array([[np.cos(ang),-np.sin(ang),0],[np.sin(ang),np.cos(ang),0],[0,0,1]])
+    #if axis==0: # x
+        #R=np.array([[1,0,0],[0,np.cos(ang),-np.sin(ang)],[0,np.sin(ang),np.cos(ang)]])
+    #elif axis==1: # y
+        #R=np.array([[np.cos(ang),0,np.sin(ang)],[0,1,0],[-np.sin(ang),0,np.cos(ang)]])
+    #elif axis==2: #z
+        #R=np.array([[np.cos(ang),-np.sin(ang),0],[np.sin(ang),np.cos(ang),0],[0,0,1]])
 
-    if compute and matrix:
-        return np.dot(R,v),R
-    if not compute and matrix:
-        return R
-    if compute and not matrix:
-        return np.dot(R,v)
+    #if compute and matrix:
+        #return np.dot(R,v),R
+    #if not compute and matrix:
+        #return R
+    #if compute and not matrix:
+        #return np.dot(R,v)
+
+def rot_mat(a,b):
+    # Returns the 3D rotation matrix to project a on b
+    # Taken from http://math.stackexchange.com/questions/180418/calculate-rotation-matrix-to-align-vector-a-to-vector-b-in-3d
+    a=a/np.linalg.norm(a)
+    b=b/np.linalg.norm(b)
+    v=np.cross(a,b)
+    c=np.dot(a,b)
+    vx=[[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]]
+    return np.eye(3)+vx+np.dot(vx,vx)/(1+c)
 
 def ssq(x):
     return np.sum(np.square(x))
@@ -176,100 +185,100 @@ def split_half(data,func,n_iter=100,groups=None,verbose=False,stabil_metric=None
             repro[ni,:]=np.abs(pairwise_metric(components1,components2,metric=repro_metric))
     return stabil,repro
 
-def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=None,N_iter=1000,svd=False,K_svd=None,group=None,verbose=False):
-    # Perform Ward clustering on BPnd data
+#def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=None,N_iter=1000,svd=False,K_svd=None,group=None,verbose=False):
+    ## Perform Ward clustering on BPnd data
 
-    if K_range is None:
-        raise ValueError('Range of cluster number not specified')
-    if svd:
-        svd=TruncatedSVD(n_components=K_svd,algorithm='arpack')
+    #if K_range is None:
+        #raise ValueError('Range of cluster number not specified')
+    #if svd:
+        #svd=TruncatedSVD(n_components=K_svd,algorithm='arpack')
 
-    if mode=='whole':
-        if verbose:
-            print('Performing ward clustering of the whole dataset')
+    #if mode=='whole':
+        #if verbose:
+            #print('Performing ward clustering of the whole dataset')
 
-        # Apply func to the data
-        if data.dtype==object:
-            data=np.column_stack(data)
-        if svd:
-            svd.fit(data.T)
-            fdata=svd.components_.T
-        else:
-            fdata=data
+        ## Apply func to the data
+        #if data.dtype==object:
+            #data=np.column_stack(data)
+        #if svd:
+            #svd.fit(data.T)
+            #fdata=svd.components_.T
+        #else:
+            #fdata=data
 
-        ward_labels=np.zeros([fdata.shape[0],len(K_range)])
-        for k,nk in zip(K_range,np.arange(0,len(K_range))):
-            mdl=AgglomerativeClustering(n_clusters=k, connectivity=adjacency,linkage='ward')
-            mdl.fit(fdata)
-            ward_labels[:,nk]=mdl.labels_+1
+        #ward_labels=np.zeros([fdata.shape[0],len(K_range)])
+        #for k,nk in zip(K_range,np.arange(0,len(K_range))):
+            #mdl=AgglomerativeClustering(n_clusters=k, connectivity=adjacency,linkage='ward')
+            #mdl.fit(fdata)
+            #ward_labels[:,nk]=mdl.labels_+1
 
-        if save_out is not None:
-            if mask is None:
-                raise ValueError('Specifiy a surface mask to save data')
-            save_surf_data(ward_labels,save_out,mask=mask,verbose=verbose)
+        #if save_out is not None:
+            #if mask is None:
+                #raise ValueError('Specifiy a surface mask to save data')
+            #save_surf_data(ward_labels,save_out,mask=mask,verbose=verbose)
 
-    # Evaluate clustering stability for a range of K
-    elif mode=='split':
-        if verbose:
-            print('Performing split-half evaluation of clustering')
+    ## Evaluate clustering stability for a range of K
+    #elif mode=='split':
+        #if verbose:
+            #print('Performing split-half evaluation of clustering')
 
-        ars=np.empty([N_iter,len(K_range)])
-        ami=np.empty([N_iter,len(K_range)])
-        mdl1=AgglomerativeClustering(compute_full_tree=True, connectivity=adjacency,linkage='ward')
-        mdl2=AgglomerativeClustering(compute_full_tree=True, connectivity=adjacency,linkage='ward')
-        if data.dtype==object:
-            N=len(data)
-        else:
-            N=data.shape[1]
+        #ars=np.empty([N_iter,len(K_range)])
+        #ami=np.empty([N_iter,len(K_range)])
+        #mdl1=AgglomerativeClustering(compute_full_tree=True, connectivity=adjacency,linkage='ward')
+        #mdl2=AgglomerativeClustering(compute_full_tree=True, connectivity=adjacency,linkage='ward')
+        #if data.dtype==object:
+            #N=len(data)
+        #else:
+            #N=data.shape[1]
 
-        for ni in np.arange(0,N_iter):
-            # Compute splits
-            if group is None:
-                kf=KFold(n_splits=2,shuffle=True,random_state=None) # Split-half model
-                split1,split2=kf.split(np.arange(0,N))
-            else:
-                kf=StratifiedKFold(n_splits=2,shuffle=True,random_state=None) # Split-half model
-                split1,split2=kf.split(np.arange(0,N,group))
+        #for ni in np.arange(0,N_iter):
+            ## Compute splits
+            #if group is None:
+                #kf=KFold(n_splits=2,shuffle=True,random_state=None) # Split-half model
+                #split1,split2=kf.split(np.arange(0,N))
+            #else:
+                #kf=StratifiedKFold(n_splits=2,shuffle=True,random_state=None) # Split-half model
+                #split1,split2=kf.split(np.arange(0,N,group))
 
-            # Apply SVD
-            if data.dtype==object:
-                data1=np.column_stack(data[split1[0]])
-                data2=np.column_stack(data[split2[0]])
-            else:
-                data1=data[:,split1[0]]
-                data2=data[:,split2[0]]
-            if svd:
+            ## Apply SVD
+            #if data.dtype==object:
+                #data1=np.column_stack(data[split1[0]])
+                #data2=np.column_stack(data[split2[0]])
+            #else:
+                #data1=data[:,split1[0]]
+                #data2=data[:,split2[0]]
+            #if svd:
 
-                svd.fit(data1.T)
-                fdata1=svd.components_.T
-                svd.fit(data2.T)
-                fdata2=svd.components_.T
-            else:
-                fdata1=data1
-                fdata2=data2
+                #svd.fit(data1.T)
+                #fdata1=svd.components_.T
+                #svd.fit(data2.T)
+                #fdata2=svd.components_.T
+            #else:
+                #fdata1=data1
+                #fdata2=data2
 
-            mdl1.fit(fdata1)
-            mdl2.fit(fdata2)
+            #mdl1.fit(fdata1)
+            #mdl2.fit(fdata2)
 
-            for nk in np.arange(0,len(K_range)):
-                # Cut trees
-                # NOTE: labels start at 0, so add one to distinguish from medial wall
-                labels1=_hc_cut(nk,mdl1.children_,mdl1.n_leaves_)+1
-                labels2=_hc_cut(nk,mdl2.children_,mdl2.n_leaves_)+1
+            #for nk in np.arange(0,len(K_range)):
+                ## Cut trees
+                ## NOTE: labels start at 0, so add one to distinguish from medial wall
+                #labels1=_hc_cut(nk,mdl1.children_,mdl1.n_leaves_)+1
+                #labels2=_hc_cut(nk,mdl2.children_,mdl2.n_leaves_)+1
 
-                # Compute metrics
-                ars[ni,nk]=metrics.adjusted_rand_score(labels1, labels2)
-                ami[ni,nk]=metrics.adjusted_mutual_info_score(labels1, labels2)
+                ## Compute metrics
+                #ars[ni,nk]=metrics.adjusted_rand_score(labels1, labels2)
+                #ami[ni,nk]=metrics.adjusted_mutual_info_score(labels1, labels2)
 
-        # Plot metrics
-        plt.figure(figsize=(8,2))
-        plt.subplot(1,2,1)
-        plt.plot(K_range,ars.mean(axis=0))
-        plt.title('Adjusted Rand Index')
-        plt.subplot(1,2,2)
-        plt.plot(K_range,ami.mean(axis=0))
-        plt.title('Adjusted Mutual Information')
-        plt.show()
+        ## Plot metrics
+        #plt.figure(figsize=(8,2))
+        #plt.subplot(1,2,1)
+        #plt.plot(K_range,ars.mean(axis=0))
+        #plt.title('Adjusted Rand Index')
+        #plt.subplot(1,2,2)
+        #plt.plot(K_range,ami.mean(axis=0))
+        #plt.title('Adjusted Mutual Information')
+        #plt.show()
 
 # FreeSurfer stuff
 
@@ -338,15 +347,19 @@ def surf_neighborhood(fname,out_type='matrix',mask=None,save_out=None,verbose=Fa
     # Identify neighbors
     if verbose:
         print('Creating neighborhood structure')
+
     for nv,ni in zip(vertices,np.arange(0,len(vertices))):
         if verbose and ni % 5000==0 and ni != 0:
             print(str(ni) + '/' + str(len(vertices)))
-        neigh_ids=np.unique(faces[np.sum(faces==nv,axis=1)>=1,:])
-        # Here we are only comparing to vertices in case a mask was provided
+        neigh_vert=np.unique(faces[np.sum(faces==nv,axis=1)>=1,:])
+        if mask:
+            neigh_vert=neigh_vert[np.asarray([x in vertices and x!=nv for x in neigh_vert],dtype=bool)]
+        neigh_ind=[np.where(vertices==x)[0][0] for x in neigh_vert]
+        
         if out_type=='matrix':
-            neigh[np.array([x in neigh_ids and x!=nv for x in vertices],dtype=bool),ni]=1
+            neigh[neigh_ind,ni]=1
         else:
-            neigh[ni]=neigh_ids[np.array([x in vertices and x!=nv for x in neigh_ids],dtype=bool)]
+            neigh[ni]=neigh_ind
 
     if save_out is not None:
         if verbose:
@@ -385,10 +398,9 @@ def split_clusters(fname,data):
             cluster[ind[0:stop],ncl]=data[ind[0:stop],nc]
             ncl=ncl+1
             nz=np.setdiff1d(nz,ind[0:stop])
-            print(len(nz))
     return cluster
 
-def create_cortex_mask(subjects_dir,targ,hemi,validate=True,verbose=False,save_out=None):
+def cortex_mask(subjects_dir,targ,hemi,validate=True,verbose=False,save_out=None):
 
     if verbose:
         print('Reading labels')
@@ -444,7 +456,7 @@ def load_surf_data(fname,mask=None,output_mask=False):
     else:
         return img
 
-def save_surf_data(data,fname,mask=None,verbose=False):
+def save_surf_data(data,fname,mask=None,verbose=False,out_type='nii'):
     if mask is not None:
         # Here we assume that the data is provided as a 1D or 2D matrix and that the rows correspond to the masks indices concatenated
         if type(mask) is not list and type(mask) is not str:
@@ -457,6 +469,8 @@ def save_surf_data(data,fname,mask=None,verbose=False):
             fname=[fname]
         if len(mask)!=len(fname):
             raise ValueError('Number of output files and masks is not the same')
+        if out_type is not 'nii' and out_type is not 'txt':
+            raise ValueError('Invalid out_type '+out_type)
 
         nstart=0
         nstop=0
@@ -465,14 +479,17 @@ def save_surf_data(data,fname,mask=None,verbose=False):
             ma,_,N=load_mask(fmask)
             nstop=nstop+len(ma)
             if data.ndim==1:
-                img=np.zeros([1,N,1,1],dtype=float)
-                img[0,ma,0,0]=data[np.arange(nstart,nstop)]
+                img=np.zeros([N,1,1,1],dtype=float)
+                img[ma,0,0,0]=data[np.arange(nstart,nstop)]
             elif data.ndim==2:
-                img=np.zeros([1,N,1,data.shape[1]],dtype=float)
-                img[0,ma,0,:]=data[np.arange(nstart,nstop),:]
+                img=np.zeros([N,1,1,data.shape[1]],dtype=float)
+                img[ma,0,0,:]=data[np.arange(nstart,nstop),:]
             if verbose:
                 print('Saving surface data to file ' + fout)
-            nib.save(nib.Nifti1Image(img, np.eye(4)), fout)
+            if out_type=='nii':
+                nib.save(nib.Nifti1Image(img, np.eye(4)), fout)
+            elif out_type=='txt'
+                np.savetxt(fout,img)
     else:
         # Here we assume that the data is well formated as a 2D matrix, i.e. there is as many rows as surface vertices
         if data.ndim==1:
@@ -483,7 +500,10 @@ def save_surf_data(data,fname,mask=None,verbose=False):
             img=data
         if verbose:
             print('Saving surface data to file ' + fname)
-        nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
+        if out_type=='nii':
+            nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
+        elif out_type=='txt'
+            np.savetxt(fname,img)        
 
 def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_out=None):
     # Computes the gradient structure at every vertex
@@ -544,23 +564,13 @@ def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_o
         # Project each neighboring points onto the plane defined by the normal
         pts=np.unique(faces[faces_ind,:])
         proj_pts=np.ndarray([len(pts),3])
-        px=position[pts,:]-position[nc,:] # Position of every point, ajuested for position of current vertice
+        px=position[pts,:]-position[nc,:] # Position of every point, adjusted for position of current vertice
         for pt in np.where(pts!=nc)[0]:
             proj_pts[pt,:]=px[pt,:]-np.dot(px[pt,:],snorm)*snorm
             proj_pts[pt,:]=proj_pts[pt,:]*(norm_arclen(px[pt,:],snorm)/np.linalg.norm(proj_pts[pt,:]))
 
         # Find rotation of normal vector onto z-axis
-        ez=np.array([0.,0.,1.])
-        # Rotate along x-axis
-        ax=vec_angle(ez,np.array([0,snorm[1],snorm[2]]))
-        if snorm[1]<0:
-            ax=-ax
-        # Rotate along y-axis
-        vrx,Rx=rotate3d(snorm,ax,axis=0,compute=True,matrix=True)
-        ay=vec_angle(ez,vrx)
-        if vrx[0]>0:
-            ay=-ay
-        vz,Ry=rotate3d(vrx,ay,axis=1,compute=True,matrix=True)
+        R=rot_mat(snorm,[0,0,1])
 
         # For sanity, check that snorm was well projected onto z-axis
         if validate_rotation:
@@ -570,7 +580,7 @@ def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_o
                 raise ValueError('Normal vector was not well projected onto z-axis')
 
         # Rotate neighbor points
-        proj[nc]=np.dot(np.dot(Ry,Rx),proj_pts.T).T[:,[0,1]] # 2d matrix with rows as points and columns as x and y
+        proj[nc]=np.dot(R,proj_pts.T).T[:,[0,1]] # 2d matrix with rows as points and columns as x and y
         neigh[nc]=pts
 
     if save_out is not None:
@@ -587,7 +597,19 @@ def load_surf_gradient(fname):
     out=np.load(fname)
     return out['arr_0'],out['arr_1'],out['arr_2'],out['arr_3']
 
-def surf_gradient(data,fgrad,save_out=None,verbose=False):
+def surf_area_ratio(corrected,template,fneigh):
+    
+    neigh,vertices=load_surf_neighborhood(fneigh)
+    
+    sqrtA=np.sqrt(corrected)
+    sqrtB=np.sqrt(template)
+    area_ratio=np.zeros(vertices.max())
+    for a in zip(vertices,):
+        for b in neigh[a]:
+            area_ratio[a]=(sqrtA(a)+sqrtA(b))/(sqrtB(a)+sqrtB(b))
+    return area_ratio
+
+def surf_gradient(data,fgrad,area_ratio=None,save_out=None,verbose=False):
     if verbose:
         print('Computing gradient')
     proj,neigh,cortex,border=load_surf_gradient(fgrad)
@@ -596,6 +618,9 @@ def surf_gradient(data,fgrad,save_out=None,verbose=False):
     if verbose:
         print('Processing cortical vertices')
     for nc in cortex:
+        if area_ratio is not None:
+            raise ValueError("Area_ratio correction not yet implemented")
+        
         # Fit a plane to obtain the gradient
         try:
             grad[nc]=np.linalg.norm(OLS(data[neigh[nc]],add_constant(proj[nc])).fit().params[1:2])
@@ -613,58 +638,193 @@ def surf_gradient(data,fgrad,save_out=None,verbose=False):
 
     return grad
 
-def surf_view(surf,data=None,view='mid',hemi='lh',snap=False,plot_snap=False):
+def surf_levelset(data,neigh,reverse=True):
 
-    mlab.init_notebook() # make plot inline in jupyter
-
-    if plot_snap and not snap: # Make sure snapping is on if we are plotting it
-        snap=True
-    if view is str:
-        view=[view]
-    if snap:
-        img=np.ndarray(len(view),dtype=object)
-
-    for nv in np.arange(0,len(view)):
-        mlab.clf()
-
-        # Adjust view according to hemisphere being displayed
-        if hemi=='lh':
-            adj=0
-        elif hemi=='rh':
-            adj=180
+    ind=np.argsort(data)
+    if reverse:
+        ind=reversed(ind)
+    clust=np.zeros(data.shape[0],dtype=int)
+    nclust=0;
+    for i  in ind:
+        # Retrieve cluster assignment of neighbors
+        neigh_clust=clust[neigh[i]]
+        
+        # How many clusters is it touching?        
+        neigh_unique=np.unique(neigh_clust)
+        neigh_valid=neigh_unique[neigh_unique>0] # Remove border and unassigned vertices
+        
+        # Is this a new cluster?
+        if len(neigh_valid)==0:
+            nclust+=1
+            clust[i]=nclust
+        # No, is it a border vertice (does it touch more than one cluster or only a border)?
+        elif len(neigh_valid) > 1:
+            clust[i]=-1        
+        # No, then assign it to the unique cluster it touches
         else:
-            raise ValueError('Invalid hemisphere '+str(hemi))
+            clust[i]=neigh_valid[0]
+    
+    if np.sum(clust==0)>0:
+        raise ValueError("Unassigned vertice detected.")
+    
+    return clust
 
-        if data is str:
-            scalars=mu.load_surf_data(data)
+def surf_levelset_two_sided(data,neigh):
+
+    ind=np.argsort(data)
+    clust=np.zeros(data.shape[0],dtype=int)
+    nclust=0;
+    start=0
+    stop=len(data)-1
+    while stop-start!=-1:
+        if data[ind[start+1]]-data[ind[start]]>data[ind[stop]]-data[ind[stop-1]]:
+            i=ind[start]
+            start+=1
         else:
-            scalars=data
-
-        faces,position=read_surf(surf)
-        mlab.triangular_mesh(position[:,0],position[:,1],position[:,2],faces,scalars=scalars)
-
-        # Adjust view
-        dist=350
-        if view[nv]=='mid':
-            mlab.view(azimuth=180+adj,elevation=90,distance=dist)
-        elif view[nv]=='side':
-            mlab.view(azimuth=0+adj,elevation=90,distance=dist)
-        elif view[nv]=='back':
-            mlab.view(azimuth=90,elevation=90,distance=dist)
-        elif view[nv]=='front':
-            mlab.view(azimuth=-90,elevation=90,distance=dist)
+            i=ind[stop]
+            stop-=1
+            
+        # Retrieve cluster assignment of neighbors
+        neigh_clust=clust[neigh[i]]
+        
+        # How many clusters is it touching?        
+        neigh_unique=np.unique(neigh_clust)
+        neigh_valid=neigh_unique[neigh_unique>0] # Remove border and unassigned vertices
+        
+        # Is this a new cluster?
+        if len(neigh_valid)==0:
+            nclust+=1
+            clust[i]=nclust
+        # No, is it a border vertice (does it touch more than one cluster or only a border)?
+        elif len(neigh_valid) > 1:
+            clust[i]=-1        
+        # No, then assign it to the unique cluster it touches
         else:
-            raise ValueError('Invalid view '+str(view[nv]))
-        if snap:
-            img[nv]=mlab.screenshot()
-            if not plot_snap: # in case plots are not inline
-                mlab.close()
-    if snap:
-        if plot_snap:
-            plt.figure(figsize=(8,2))
-            for nv in np.arange(0,len(view)):
-                plt.subplot(1,len(view),nv+1)
-                plt.imshow(img[nv])
-                plt.axis('off')
-            plt.show()
-        return img
+            clust[i]=neigh_valid[0]
+    
+    if np.sum(clust==0)>0:
+        raise ValueError("Unassigned vertice detected.")
+    
+    return clust
+
+def surf_levelset_mean(data,neigh):
+
+    ind=np.argsort(data)
+    clust=np.zeros(data.shape[0],dtype=int)
+    nclust=0;
+    start=0
+    stop=len(data)-1
+    
+    while start-stop<1:
+        
+        # Retrieve cluster assignment of neighbors
+        start_neigh_clust=clust[neigh[ind[start]]]
+        stop_neigh_clust=clust[neigh[ind[stop]]]
+ 
+        # How many clusters is it touching?        
+        start_neigh_unique=np.unique(start_neigh_clust)
+        start_neigh_valid=start_neigh_unique[start_neigh_unique>0] # Remove border and unassigned vertices
+        stop_neigh_unique=np.unique(stop_neigh_clust)
+        stop_neigh_valid=stop_neigh_unique[stop_neigh_unique>0] # Remove border and unassigned vertices
+ 
+        # Is this a new cluster?
+        if len(start_neigh_valid)==0:
+            nclust+=1
+            clust[ind[start]]=nclust
+            start+=1
+        if len(stop_neigh_valid)==0:
+            nclust+=1
+            clust[ind[stop]]=nclust
+            stop-=1
+ 
+        # No, is it a border vertice (does it touch more than one cluster or only a border)?
+        if len(start_neigh_valid) > 1:
+            clust[ind[start]]=-1
+            start+=1
+        if len(stop_neigh_valid) > 1:
+            clust[ind[stop]]=-1
+            stop-=1
+        
+        # No, then assign it to the unique cluster it touches
+        if len(start_neigh_valid)==1 and len(stop_neigh_valid)==1:
+            start_dist=np.abs(data[ind[start]]-np.mean(data[clust==start_neigh_valid[0]]))
+            stop_dist=np.abs(data[ind[stop]]-np.mean(data[clust==stop_neigh_valid[0]]))
+            if start_dist>stop_dist:
+                clust[ind[start]]=start_neigh_valid[0]
+                start+=1
+            elif stop_dist>start_dist:
+                clust[ind[stop]]=stop_neigh_valid[0]
+                stop-=1
+            else:
+                clust[ind[start]]=start_neigh_valid[0]
+                clust[ind[stop]]=stop_neigh_valid[0]
+                start+=1
+                stop-=1
+        else:
+            if len(start_neigh_valid)==1:
+                clust[ind[start]]=start_neigh_valid[0]
+                start+=1
+            if len(stop_neigh_valid)==1:
+                clust[ind[stop]]=stop_neigh_valid[0]
+                stop-=1
+    
+    if np.sum(clust==0)>0:
+        raise ValueError("Unassigned vertice detected.")
+    
+    return clust
+
+#def surf_view(surf,data=None,view='mid',hemi='lh',snap=False,plot_snap=False):
+
+    #mlab.init_notebook() # make plot inline in jupyter
+
+    #if plot_snap and not snap: # Make sure snapping is on if we are plotting it
+        #snap=True
+    #if view is str:
+        #view=[view]
+    #if snap:
+        #img=np.ndarray(len(view),dtype=object)
+
+    #for nv in np.arange(0,len(view)):
+        #mlab.clf()
+
+        ## Adjust view according to hemisphere being displayed
+        #if hemi=='lh':
+            #adj=0
+        #elif hemi=='rh':
+            #adj=180
+        #else:
+            #raise ValueError('Invalid hemisphere '+str(hemi))
+
+        #if data is str:
+            #scalars=mu.load_surf_data(data)
+        #else:
+            #scalars=data
+
+        #faces,position=read_surf(surf)
+        #mlab.triangular_mesh(position[:,0],position[:,1],position[:,2],faces,scalars=scalars)
+
+        ## Adjust view
+        #dist=350
+        #if view[nv]=='mid':
+            #mlab.view(azimuth=180+adj,elevation=90,distance=dist)
+        #elif view[nv]=='side':
+            #mlab.view(azimuth=0+adj,elevation=90,distance=dist)
+        #elif view[nv]=='back':
+            #mlab.view(azimuth=90,elevation=90,distance=dist)
+        #elif view[nv]=='front':
+            #mlab.view(azimuth=-90,elevation=90,distance=dist)
+        #else:
+            #raise ValueError('Invalid view '+str(view[nv]))
+        #if snap:
+            #img[nv]=mlab.screenshot()
+            #if not plot_snap: # in case plots are not inline
+                #mlab.close()
+    #if snap:
+        #if plot_snap:
+            #plt.figure(figsize=(8,2))
+            #for nv in np.arange(0,len(view)):
+                #plt.subplot(1,len(view),nv+1)
+                #plt.imshow(img[nv])
+                #plt.axis('off')
+            #plt.show()
+        #return img
