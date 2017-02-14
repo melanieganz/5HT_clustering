@@ -488,7 +488,7 @@ def save_surf_data(data,fname,mask=None,verbose=False,out_type='nii'):
                 print('Saving surface data to file ' + fout)
             if out_type=='nii':
                 nib.save(nib.Nifti1Image(img, np.eye(4)), fout)
-            elif out_type=='txt'
+            elif out_type=='txt':
                 np.savetxt(fout,img)
     else:
         # Here we assume that the data is well formated as a 2D matrix, i.e. there is as many rows as surface vertices
@@ -502,7 +502,7 @@ def save_surf_data(data,fname,mask=None,verbose=False,out_type='nii'):
             print('Saving surface data to file ' + fname)
         if out_type=='nii':
             nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
-        elif out_type=='txt'
+        elif out_type=='txt':
             np.savetxt(fname,img)        
 
 def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_out=None):
