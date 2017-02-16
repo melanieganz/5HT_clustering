@@ -10,13 +10,14 @@ import matplotlib.pyplot as plt
 #from mayavi import mlab
 
 # Sklearn stuff
-from sklearn.decomposition import TruncatedSVD
 import sklearn.metrics.cluster as metrics
+from sklearn.decomposition import TruncatedSVD,FastICA
+from sklearn.linear_model import Ridge
+from sklearn.decomposition import dict_learning_online
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.cluster.hierarchical import _hc_cut # Internal function to cut ward tree, helps speed up things a lot
 from sklearn.utils import resample
 from sklearn.model_selection import KFold,StratifiedKFold
-from sklearn.metrics.pairwise import cosine_similarity
 
 def balance_components(trg_orig,src_orig,return_balanced=False,metric='corr',center=False):
     
@@ -81,24 +82,6 @@ def normalize_range(x,percentile=None):
         x[x>up]=up
     return (x - x.min()) / (x.max() - x.min())
 
-#def rotate3d(v,ang,axis=0,compute=True,matrix=False):
-    ## Simple 3d rotation, one axis at a time, to avoid confusion.
-    ## Could be expanded eventually, but not necessary at the time
-
-    #if axis==0: # x
-        #R=np.array([[1,0,0],[0,np.cos(ang),-np.sin(ang)],[0,np.sin(ang),np.cos(ang)]])
-    #elif axis==1: # y
-        #R=np.array([[np.cos(ang),0,np.sin(ang)],[0,1,0],[-np.sin(ang),0,np.cos(ang)]])
-    #elif axis==2: #z
-        #R=np.array([[np.cos(ang),-np.sin(ang),0],[np.sin(ang),np.cos(ang),0],[0,0,1]])
-
-    #if compute and matrix:
-        #return np.dot(R,v),R
-    #if not compute and matrix:
-        #return R
-    #if compute and not matrix:
-        #return np.dot(R,v)
-
 def rot_mat(a,b):
     # Returns the 3D rotation matrix to project a on b
     # Taken from http://math.stackexchange.com/questions/180418/calculate-rotation-matrix-to-align-vector-a-to-vector-b-in-3d
@@ -112,13 +95,15 @@ def rot_mat(a,b):
 def ssq(x):
     return np.sum(np.square(x))
 
-def rv(x,y):
-    xc=x-x.mean(axis=0)
-    yc=y-y.mean(axis=0) 
-    return ssq(np.dot(yc.T,xc))/np.sqrt(ssq(np.dot(xc.T,xc))*ssq(np.dot(yc.T,yc)))
+def rv(X,Y):
+    Xc=X-X.mean(axis=0)
+    Yc=Y-Y.mean(axis=0) 
+    S=np.dot(Xc,Xc.T)
+    T=np.dot(Xc,Xc.T)
+    return np.sum(np.multiply(S,T))/np.sqrt(ssq(S)*ssq(T))
 
 def congruence(X,Y):
-    return np.sum(np.multiply(X,Y))/np.sqrt(np.sum(np.square(X))*np.sum(np.square(X)))
+    return np.sum(np.multiply(X,Y))/np.sqrt(ssq(X)*ssq(Y))
 
 def stability(X,Y,metric='rv'):
     if metric=='rv':
@@ -185,128 +170,59 @@ def split_half(data,func,n_iter=100,groups=None,verbose=False,stabil_metric=None
             repro[ni,:]=np.abs(pairwise_metric(components1,components2,metric=repro_metric))
     return stabil,repro
 
-#def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=None,N_iter=1000,svd=False,K_svd=None,group=None,verbose=False):
+def ward_clustering(data,adj,K_range=None,save_out=None,mask=None,verbose=False):
 
-    #if K_range is None:
-        #raise ValueError('Range of cluster number not specified')
+    if K_range is None:
+        raise ValueError('Range of cluster number not specified')
 
-        #if verbose:
-            #print('Performing ward clustering of the whole dataset')
+    if verbose:
+        print('Performing ward clustering')
 
-        ## Apply func to the data
-        #if data.dtype==object:
-            #data=np.column_stack(data)
-        #if svd:
-            #svd.fit(data.T)
-            #fdata=svd.components_.T
-        #else:
-            #fdata=data
+    ward_labels=np.zeros([data.shape[0],len(K_range)])
+    mdl=AgglomerativeClustering(compute_full_tree=True,connectivity=adj,linkage='ward')
+    mdl.fit(data)        
+    for K,nk in zip(K_range,np.arange(0,len(K_range))):
+        # Cut trees
+        ward_labels[:,nk]=_hc_cut(K,mdl.children_,mdl.n_leaves_)+1
 
-        #ward_labels=np.zeros([fdata.shape[0],len(K_range)])
-        #for k,nk in zip(K_range,np.arange(0,len(K_range))):
-            #mdl=AgglomerativeClustering(n_clusters=k, connectivity=adjacency,linkage='ward')
-            #mdl.fit(fdata)
-            #ward_labels[:,nk]=mdl.labels_+1
+    if save_out is not None:
+        if mask is None:
+            raise ValueError('Specifiy a surface mask to save data')
+        save_surf_data(ward_labels,save_out,mask=mask,verbose=verbose)
 
-        #if save_out is not None:
-            #if mask is None:
-                #raise ValueError('Specifiy a surface mask to save data')
-            #save_surf_data(ward_labels,save_out,mask=mask,verbose=verbose)
+def dict_learning_adapted(data,K,alpha=1):
 
-#def ward_clustering(data,adjacency,mode='split',K_range=None,save_out=None,mask=None,N_iter=1000,svd=False,K_svd=None,group=None,verbose=False):
-    ## Perform Ward clustering on BPnd data
+    ica=FastICA(n_components=K,fun='cube',max_iter=5000,tol=0.0001)
+    ica.fit(data.T)
+    S = (ica.components_ ** 2).sum(axis=1)
+    S[S == 0] = 1
+    ica.components_ /= S[:, np.newaxis]
 
-    #if K_range is None:
-        #raise ValueError('Range of cluster number not specified')
-    #if svd:
-        #svd=TruncatedSVD(n_components=K_svd,algorithm='arpack')
+    ridge = Ridge(fit_intercept=None, alpha=1e-6)
+    ridge.fit(ica.components_.T, data)
+    loadings = ridge.coef_.T
+    S = np.sqrt(np.sum(loadings ** 2, axis=0))
+    S[S == 0] = 1
+    loadings /= S[np.newaxis, :]
 
-    #if mode=='whole':
-        #if verbose:
-            #print('Performing ward clustering of the whole dataset')
+    n_features=data.shape[0]
+    batch_size=20
+    n_iter = ((n_features - 1) // batch_size + 1)
+    components, _ = dict_learning_online(
+            data, K, alpha=alpha, n_iter=n_iter,
+            batch_size=20, method='cd',
+            return_code=True, shuffle=True)
+    components=components.T
 
-        ## Apply func to the data
-        #if data.dtype==object:
-            #data=np.column_stack(data)
-        #if svd:
-            #svd.fit(data.T)
-            #fdata=svd.components_.T
-        #else:
-            #fdata=data
+    S = np.sqrt(np.sum(components ** 2, axis=1))
+    S[S == 0] = 1
+    components /= S[:, np.newaxis]
 
-        #ward_labels=np.zeros([fdata.shape[0],len(K_range)])
-        #for k,nk in zip(K_range,np.arange(0,len(K_range))):
-            #mdl=AgglomerativeClustering(n_clusters=k, connectivity=adjacency,linkage='ward')
-            #mdl.fit(fdata)
-            #ward_labels[:,nk]=mdl.labels_+1
-
-        #if save_out is not None:
-            #if mask is None:
-                #raise ValueError('Specifiy a surface mask to save data')
-            #save_surf_data(ward_labels,save_out,mask=mask,verbose=verbose)
-
-    ## Evaluate clustering stability for a range of K
-    #elif mode=='split':
-        #if verbose:
-            #print('Performing split-half evaluation of clustering')
-
-        #ars=np.empty([N_iter,len(K_range)])
-        #ami=np.empty([N_iter,len(K_range)])
-        #mdl1=AgglomerativeClustering(compute_full_tree=True, connectivity=adjacency,linkage='ward')
-        #mdl2=AgglomerativeClustering(compute_full_tree=True, connectivity=adjacency,linkage='ward')
-        #if data.dtype==object:
-            #N=len(data)
-        #else:
-            #N=data.shape[1]
-
-        #for ni in np.arange(0,N_iter):
-            ## Compute splits
-            #if group is None:
-                #kf=KFold(n_splits=2,shuffle=True,random_state=None) # Split-half model
-                #split1,split2=kf.split(np.arange(0,N))
-            #else:
-                #kf=StratifiedKFold(n_splits=2,shuffle=True,random_state=None) # Split-half model
-                #split1,split2=kf.split(np.arange(0,N,group))
-
-            ## Apply SVD
-            #if data.dtype==object:
-                #data1=np.column_stack(data[split1[0]])
-                #data2=np.column_stack(data[split2[0]])
-            #else:
-                #data1=data[:,split1[0]]
-                #data2=data[:,split2[0]]
-            #if svd:
-
-                #svd.fit(data1.T)
-                #fdata1=svd.components_.T
-                #svd.fit(data2.T)
-                #fdata2=svd.components_.T
-            #else:
-                #fdata1=data1
-                #fdata2=data2
-
-            #mdl1.fit(fdata1)
-            #mdl2.fit(fdata2)
-
-            #for nk in np.arange(0,len(K_range)):
-                ## Cut trees
-                ## NOTE: labels start at 0, so add one to distinguish from medial wall
-                #labels1=_hc_cut(nk,mdl1.children_,mdl1.n_leaves_)+1
-                #labels2=_hc_cut(nk,mdl2.children_,mdl2.n_leaves_)+1
-
-                ## Compute metrics
-                #ars[ni,nk]=metrics.adjusted_rand_score(labels1, labels2)
-                #ami[ni,nk]=metrics.adjusted_mutual_info_score(labels1, labels2)
-
-        ## Plot metrics
-        #plt.figure(figsize=(8,2))
-        #plt.subplot(1,2,1)
-        #plt.plot(K_range,ars.mean(axis=0))
-        #plt.title('Adjusted Rand Index')
-        #plt.subplot(1,2,2)
-        #plt.plot(K_range,ami.mean(axis=0))
-        #plt.title('Adjusted Mutual Information')
-        #plt.show()
+    for comp in components:
+        if np.sum(comp > 0) < np.sum(comp < 0):
+            comp *= -1 
+    
+    return components.T
 
 # FreeSurfer stuff
 
@@ -484,7 +400,7 @@ def load_surf_data(fname,mask=None,output_mask=False):
     else:
         return img
 
-def save_surf_data(data,fname,mask=None,verbose=False,out_type='nii'):
+def save_surf_data(data,fname,mask=None,verbose=False):
     if mask is not None:
         # Here we assume that the data is provided as a 1D or 2D matrix and that the rows correspond to the masks indices concatenated
         if type(mask) is not list and type(mask) is not str:
@@ -497,9 +413,7 @@ def save_surf_data(data,fname,mask=None,verbose=False,out_type='nii'):
             fname=[fname]
         if len(mask)!=len(fname):
             raise ValueError('Number of output files and masks is not the same')
-        if out_type is not 'nii' and out_type is not 'txt':
-            raise ValueError('Invalid out_type '+out_type)
-
+        
         nstart=0
         nstop=0
         for fout,fmask in zip(fname,mask):
@@ -514,25 +428,19 @@ def save_surf_data(data,fname,mask=None,verbose=False,out_type='nii'):
                 img[ma,0,0,:]=data[np.arange(nstart,nstop),:]
             if verbose:
                 print('Saving surface data to file ' + fout)
-            if out_type=='nii':
-                nib.save(nib.Nifti1Image(img, np.eye(4)), fout)
-            elif out_type=='txt':
-                np.savetxt(fout,img)
+            nib.save(nib.Nifti1Image(img, np.eye(4)), fout)
     else:
         # Here we assume that the data is well formated as a 2D matrix, i.e. there is as many rows as surface vertices
         if data.ndim==1:
-            img=np.reshape(data,[1,data.shape[0],1,1])
+            img=np.reshape(data,[data.shape[0],1,1,1])
         elif data.ndim==2:
-            img=np.reshape(data,[1,data.shape[0],1,data.shape[1]])
+            img=np.reshape(data,[data.shape[0],1,1,data.shape[1]])
         else:
             img=data
         if verbose:
             print('Saving surface data to file ' + fname)
-        if out_type=='nii':
-            nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
-        elif out_type=='txt':
-            np.savetxt(fname,img)        
-
+        nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
+            
 def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_out=None):
     # Computes the gradient structure at every vertex
 
