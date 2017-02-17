@@ -441,7 +441,26 @@ def save_surf_data(data,fname,mask=None,verbose=False):
             print('Saving surface data to file ' + fname)
         nib.save(nib.Nifti1Image(img, np.eye(4)), fname)
             
-def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_out=None):
+def surf_compute_area(fname,verbose=False):
+    if verbose:
+        print('Processing '+fname)
+    faces,position=read_surf(fname)
+    vertices=np.unique(faces)
+    area=np.zeros(len(vertices),dtype=float)
+    for v,ni in zip(vertices,np.arange(0,len(vertices))):
+        if verbose:
+            if ni % 5000==0 and ni != 0:
+                print(str(ni) + '/' + str(len(vertices)))
+        # Find all faces containing vertice v
+        fv=faces[np.array(np.sum(faces==v,axis=1),dtype=bool),:]
+        for nf in np.arange(0,fv.shape[0]):
+            p0=position[fv[nf,0],:]
+            p1=position[fv[nf,1],:]
+            p2=position[fv[nf,2],:]
+            area[v]+=np.sum(np.square(np.cross(p1-p0,p2-p0)))/6 # 1/2 of the parallelogram and 1/3 of to each point
+    return area
+            
+def surf_gradient_struct(fname,mask,verbose=False,save_out=None):
     # Computes the gradient structure at every vertex
 
     if verbose:
@@ -468,6 +487,7 @@ def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_o
 
     if verbose:
         print('Computing gradient structure for cortical vertices')
+
     for nc,ni in zip(cortex,np.arange(0,len(cortex))):
 
         # Note: vertices for each faces are always ordered so that their cross product points outward,
@@ -477,6 +497,8 @@ def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_o
             if ni % 10000==0 and ni != 0:
                 print(str(ni) + '/' + str(len(cortex)))
 
+
+        Tracer()()
         # Find the normal of each face the current vertice is part of and take the average
         faces_ind=np.where(np.sum(faces==nc,axis=1)>=1)[0] # Extract rows for each faces containing the current vertice
         fnorm=np.ndarray([3,len(faces_ind)])
@@ -491,6 +513,8 @@ def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_o
             elif ind==2:
                 fnorm[:,nn]=np.cross(position[faces[nf,1],:]-position[faces[nf,2],:],
                                 position[faces[nf,0],:]-position[faces[nf,2],:])
+                
+        Tracer()()
 
         # Take average of all faces norms and normalize final vector
         fnorm=fnorm/np.linalg.norm(fnorm)
@@ -507,13 +531,8 @@ def surf_gradient_struct(fname,mask,verbose=False,validate_rotation=False,save_o
 
         # Find rotation of normal vector onto z-axis
         R=rot_mat(snorm,[0,0,1])
-
-        # For sanity, check that snorm was well projected onto z-axis
-        if validate_rotation:
-            if (not math.isclose(vz[0],0.0, abs_tol=1e-9) or not math.isclose(vz[1],0.0, abs_tol=1e-9) or not
-                math.isclose(vz[2],1.0, abs_tol=1e-9)):
-                print(vz)
-                raise ValueError('Normal vector was not well projected onto z-axis')
+        
+        Tracer()()
 
         # Rotate neighbor points
         proj[nc]=np.dot(R,proj_pts.T).T[:,[0,1]] # 2d matrix with rows as points and columns as x and y
@@ -533,30 +552,41 @@ def load_surf_gradient(fname):
     out=np.load(fname)
     return out['arr_0'],out['arr_1'],out['arr_2'],out['arr_3']
 
-def surf_area_ratio(corrected,template,fneigh):
-    
-    neigh,vertices=load_surf_neighborhood(fneigh)
-    
+def surf_area_ratio(corrected,template,fneigh):    
+    neigh,vertices=load_surf_neighborhood(fneigh)    
     sqrtA=np.sqrt(corrected)
     sqrtB=np.sqrt(template)
-    area_ratio=np.zeros(vertices.max())
-    for a in zip(vertices,):
-        for b in neigh[a]:
-            area_ratio[a]=(sqrtA(a)+sqrtA(b))/(sqrtB(a)+sqrtB(b))
+    area_ratio=np.zeros(vertices.max(),dtype=object)
+    for a,na in zip(vertices,np.arange(0,len(vertices))):        
+        area_ratio[na]=np.ndarray(len(neigh[na]),dtype=float)
+        for b,nb in zip(neigh[na],np.arange(0,len(neigh[na]))):
+            area_ratio[na][nb]=(sqrtA[a]+sqrtA[b])/(sqrtB[a]+sqrtB[b])
     return area_ratio
 
-def surf_gradient(data,fgrad,area_ratio=None,save_out=None,verbose=False):
+def surf_gradient(data,fgrad,area_ratio=None,fneigh=None,verbose=False):
+        
     if verbose:
         print('Computing gradient')
     proj,neigh,cortex,border=load_surf_gradient(fgrad)
-    grad=np.zeros(proj.shape[0],dtype=float)
+    grad=np.zeros(len(cortex),dtype=float)
+
+    if area_ratio is not None and fneigh is None: 
+        raise ValueError("Neighborhood structure list fnrigh needs to be specified when using area_ratio")
+    
+    Tracer()()
+    if area_ratio is not None:
+        if verbose:
+            print('Applying area correction')
+        area_neigh,area_vertices=load_surf_neighborhood(fneigh)
+        if area_ratio is not None:
+            for nc in np.arange(0,len(cortex)):
+                for nb in np.arange(0,len(neigh[nc])):
+                    ind=area_vertices==cortex[nc] # Find area vertice corresponding to current cortex vertice
+                    proj[nc][nb,:]=proj[nc][nb,:]*area_ratio[ind][nb==area_neigh[ind]]
 
     if verbose:
         print('Processing cortical vertices')
-    for nc in cortex:
-        if area_ratio is not None:
-            raise ValueError("Area_ratio correction not yet implemented")
-        
+    for nc in cortex:        
         # Fit a plane to obtain the gradient
         try:
             grad[nc]=np.linalg.norm(OLS(data[neigh[nc]],add_constant(proj[nc])).fit().params[1:2])
